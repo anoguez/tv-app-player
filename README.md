@@ -1,6 +1,6 @@
-# TV App player page
+# Perrito TV player page
 
-A single static page that hosts YouTube's official embedded player for TV App on
+A single static page that hosts YouTube's official embedded player for Perrito TV on
 LG webOS TVs. YouTube's player only plays inside a page with a real web address,
 and the TV app runs from a local file, so it shows this page in a frame and
 controls the player through messages.
