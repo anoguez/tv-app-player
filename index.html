@@ -1,0 +1,124 @@
+<!doctype html>
+<!--
+  TV App player page. Published at https://anoguez.github.io/tv-app-player/ (public repo
+  anoguez/tv-app-player). The source of truth is platforms/player-page/ in the private app repo.
+
+  Why it exists: YouTube's embedded player only plays when the page around it has a real
+  web address. The LG TV app runs from a local file, so it shows this page in a frame and
+  drives the player with messages instead.
+
+  It holds nothing private: no keys, no tokens, no user data. It only accepts commands from
+  the page that framed it, and only reports player state (playing/paused, time, errors).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>TV App player</title>
+    <style>
+      html,
+      body,
+      #player {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      (function () {
+        'use strict';
+        // Only the app that framed this page may control it.
+        var parentWindow = window.parent !== window ? window.parent : null;
+        var player = null;
+        var ticker = null;
+
+        function send(msg) {
+          // The TV app runs from file://, whose origin is "null", so it can't be targeted
+          // by name. Only player state is sent, never anything private.
+          if (parentWindow) parentWindow.postMessage(Object.assign({ source: 'tv-app-player' }, msg), '*');
+        }
+
+        function status() {
+          if (!player || !player.getCurrentTime) return;
+          send({
+            type: 'status',
+            cur: player.getCurrentTime() || 0,
+            dur: player.getDuration() || 0,
+            state: player.getPlayerState(),
+            rate: player.getPlaybackRate(),
+            muted: player.isMuted(),
+          });
+        }
+
+        var ALLOWED_CALLS = {
+          playVideo: 1, pauseVideo: 1, seekTo: 1, mute: 1, unMute: 1,
+          setPlaybackRate: 1, loadModule: 1, unloadModule: 1,
+        };
+
+        function load(opts) {
+          if (player) {
+            player.destroy();
+            player = null;
+          }
+          var host = document.getElementById('player');
+          var mount = document.createElement('div');
+          host.innerHTML = '';
+          host.appendChild(mount);
+          var vars = {};
+          var pv = opts.playerVars || {};
+          // Pass through only plain player parameters.
+          ['autoplay', 'controls', 'rel', 'iv_load_policy', 'playsinline', 'disablekb', 'fs', 'start', 'cc_load_policy'].forEach(function (k) {
+            if (typeof pv[k] === 'number') vars[k] = pv[k];
+          });
+          vars.origin = location.origin;
+          player = new YT.Player(mount, {
+            videoId: String(opts.videoId || ''),
+            width: '100%',
+            height: '100%',
+            playerVars: vars,
+            events: {
+              onReady: function () {
+                send({ type: 'ready', rates: player.getAvailablePlaybackRates() });
+                status();
+              },
+              onStateChange: function (e) {
+                send({ type: 'state', data: e.data });
+                status();
+              },
+              onError: function (e) {
+                send({ type: 'error', data: e.data });
+              },
+            },
+          });
+          clearInterval(ticker);
+          ticker = setInterval(status, 500);
+        }
+
+        window.addEventListener('message', function (e) {
+          if (!parentWindow || e.source !== parentWindow) return;
+          var msg = e.data;
+          if (!msg || msg.target !== 'tv-app-player') return;
+          if (msg.type === 'load' && typeof msg.videoId === 'string' && /^[\w-]{6,20}$/.test(msg.videoId)) {
+            load(msg);
+          } else if (msg.type === 'call' && player && ALLOWED_CALLS[msg.method] && typeof player[msg.method] === 'function') {
+            player[msg.method].apply(player, Array.isArray(msg.args) ? msg.args : []);
+            status();
+          }
+        });
+
+        window.onYouTubeIframeAPIReady = function () {
+          send({ type: 'api-ready' });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(s);
+      })();
+    </script>
+  </body>
+</html>
